@@ -3,7 +3,7 @@ const fs = require("fs");
 const path = require("path");
 
 const CHANNEL_ID = "1437151487141740637";
-
+const TOKEN = procces.env.TOKEN
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
