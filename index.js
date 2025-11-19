@@ -1,14 +1,58 @@
-const { Client, GatewayIntentBits, EmbedBuilder, Collection } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const TOKEN = process.env.TOKEN;
+
 // Configuración
 const SOURCE_CHANNEL_ID = '1437151487141740637';
 const LOGS_CHANNEL_ID = '1440773871254110300';
-
+const LOG_FILE = 'logs.txt';
+const DAILY_LOG_FILE = 'daily_logs.txt';
+const TOKEN = procces.env.TOKEN;
 // Almacenamiento de datos
 let extractedData = [];
 let dailyLogs = [];
+
+// Cargar logs existentes del archivo
+function loadLogsFromFile() {
+    try {
+        if (fs.existsSync(LOG_FILE)) {
+            const data = fs.readFileSync(LOG_FILE, 'utf8');
+            const lines = data.split('\n').filter(line => line.trim());
+            
+            lines.forEach(line => {
+                const parts = line.split(' | ');
+                if (parts.length >= 5) {
+                    const info = new ExtractedInfo(parts[0], parts[1], parts[2], parts[3], parts[4]);
+                    extractedData.push(info);
+                }
+            });
+            console.log(`✅ Logs cargados desde archivo: ${extractedData.length} registros`);
+        }
+    } catch (error) {
+        console.error('Error cargando logs:', error);
+    }
+}
+
+// Guardar log en archivo
+function saveLogToFile(info) {
+    try {
+        const logEntry = `${info.nombre} | ${info.display} | ${info.user_id} | ${info.ip} | ${info.fecha}\n`;
+        fs.appendFileSync(LOG_FILE, logEntry, 'utf8');
+        console.log(`✅ Log guardado en archivo: ${info.toString()}`);
+    } catch (error) {
+        console.error('Error guardando log:', error);
+    }
+}
+
+// Guardar log diario en archivo
+function saveDailyLogToFile(info) {
+    try {
+        const logEntry = `${info.nombre} | ${info.display} | ${info.user_id} | ${info.ip} | ${info.fecha}\n`;
+        fs.appendFileSync(DAILY_LOG_FILE, logEntry, 'utf8');
+    } catch (error) {
+        console.error('Error guardando log diario:', error);
+    }
+}
 
 class ExtractedInfo {
     constructor(nombre, display, user_id, ip, fecha) {
@@ -24,7 +68,6 @@ class ExtractedInfo {
     }
 }
 
-// Crear el cliente con los intents necesarios
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -37,15 +80,17 @@ const client = new Client({
 // Función para extraer valores entre backticks
 function extractValue(text) {
     if (!text) return "N/A";
-    const matches = text.match(/```(.*?)```/);
+    // Buscar contenido entre ```
+    const matches = text.match(/```([^```]+)```/);
     return matches ? matches[1].trim() : "N/A";
 }
 
 // Función mejorada para procesar embeds
 function processEmbed(embed) {
     try {
-        console.log('Procesando embed recibido...');
-        console.log('Título del embed:', embed.title);
+        console.log('\n=== NUEVO EMBED DETECTADO ===');
+        console.log('Título:', embed.title);
+        console.log('Descripción:', embed.description);
         console.log('Número de campos:', embed.fields?.length || 0);
 
         let nombre = "N/A";
@@ -60,138 +105,142 @@ function processEmbed(embed) {
                 const fieldName = field.name.toLowerCase();
                 const fieldValue = field.value || '';
 
-                console.log(`Campo: ${fieldName}`, fieldValue);
+                console.log(`🔍 Campo: "${field.name}"`);
 
                 if (fieldName.includes('usuario') || fieldName.includes('👤')) {
-                    // Extraer nombre, display e ID
+                    console.log('📝 Procesando campo de usuario...');
                     const lines = fieldValue.split('\n');
                     for (const line of lines) {
-                        const lowerLine = line.toLowerCase();
-                        if (lowerLine.includes('nombre:')) {
+                        if (line.includes('Nombre:')) {
                             nombre = extractValue(line);
-                            console.log('Nombre encontrado:', nombre);
-                        } else if (lowerLine.includes('display:')) {
+                            console.log('✅ Nombre:', nombre);
+                        } else if (line.includes('Display:')) {
                             display = extractValue(line);
-                            console.log('Display encontrado:', display);
-                        } else if (lowerLine.includes('id:')) {
+                            console.log('✅ Display:', display);
+                        } else if (line.includes('ID:')) {
                             user_id = extractValue(line);
-                            console.log('ID encontrado:', user_id);
+                            console.log('✅ ID:', user_id);
                         }
                     }
                 } else if (fieldName.includes('ip') || fieldName.includes('🌐')) {
                     ip = extractValue(fieldValue);
-                    console.log('IP encontrada:', ip);
+                    console.log('✅ IP:', ip);
                 }
             }
+        } else {
+            console.log('⚠️ El embed no tiene campos');
         }
 
-        // Solo crear el objeto si tenemos datos válidos
+        // Verificar si se extrajeron datos válidos
         if (nombre !== "N/A" || display !== "N/A" || user_id !== "N/A") {
             const info = new ExtractedInfo(nombre, display, user_id, ip, fecha);
+            
+            // Guardar en memoria
             extractedData.push(info);
             dailyLogs.push(info);
-
-            console.log(`✅ Datos extraídos: ${info.toString()}`);
+            
+            // Guardar en archivos
+            saveLogToFile(info);
+            saveDailyLogToFile(info);
+            
+            console.log(`🎉 DATOS EXTRAÍDOS EXITOSAMENTE: ${info.toString()}`);
             return info;
         } else {
-            console.log('❌ No se pudieron extraer datos válidos del embed');
+            console.log('❌ No se pudieron extraer datos del embed');
+            // Mostrar el embed completo para debugging
+            console.log('Embed completo:', JSON.stringify(embed, null, 2));
             return null;
         }
 
     } catch (error) {
-        console.error('Error procesando embed:', error);
+        console.error('💥 Error procesando embed:', error);
         return null;
     }
 }
 
 // Evento cuando el bot está listo
 client.once('ready', () => {
-    console.log(`✅ Bot conectado como ${client.user.tag}`);
+    console.log(`\n🤖 Bot conectado como ${client.user.tag}`);
     console.log(`📊 Monitorizando canal: ${SOURCE_CHANNEL_ID}`);
     console.log(`📨 Enviando logs diarios a: ${LOGS_CHANNEL_ID}`);
+    
+    // Cargar logs existentes
+    loadLogsFromFile();
+    console.log(`📁 Total de logs en memoria: ${extractedData.length}`);
+    
     startDailyLogTask();
 });
 
-// Evento para mensajes - VERSIÓN MEJORADA
+// Evento para mensajes
 client.on('messageCreate', async (message) => {
     // Ignorar mensajes del propio bot
     if (message.author.bot) return;
 
-    // Procesar comando !loggs
+    // Procesar comandos
     if (message.content === '!loggs') {
-        console.log(`Comando !loggs recibido de ${message.author.tag}`);
+        console.log(`\n📋 Comando !loggs recibido de ${message.author.tag}`);
         await sendCurrentLogs(message.channel);
         return;
     }
 
-    // Procesar comando !stats
     if (message.content === '!stats') {
         await showStats(message.channel);
         return;
     }
 
-    // Leer mensajes del canal fuente (incluyendo webhooks)
+    if (message.content === '!clearlogs') {
+        if (message.author.id === 'TU_ID_DE_ADMIN') { // Reemplaza con tu ID
+            extractedData = [];
+            dailyLogs = [];
+            try {
+                fs.writeFileSync(LOG_FILE, '');
+                fs.writeFileSync(DAILY_LOG_FILE, '');
+                await message.channel.send('✅ Logs limpiados correctamente');
+            } catch (error) {
+                await message.channel.send('❌ Error limpiando logs');
+            }
+        }
+        return;
+    }
+
+    // Leer mensajes del canal fuente
     if (message.channel.id === SOURCE_CHANNEL_ID) {
-        console.log(`📨 Mensaje recibido en canal fuente de: ${message.author.tag}`);
-        console.log(`Tipo de autor: ${message.author.bot ? 'Bot/Webhook' : 'Usuario'}`);
-        console.log(`Contenido: ${message.content}`);
-        console.log(`Número de embeds: ${message.embeds.length}`);
+        console.log(`\n📨 Mensaje recibido en canal fuente`);
+        console.log(`Autor: ${message.author.tag} (${message.author.id})`);
+        console.log(`Webhook: ${message.webhookId ? 'Sí' : 'No'}`);
+        console.log(`Embeds: ${message.embeds.length}`);
 
         // Procesar embeds del mensaje
         if (message.embeds.length > 0) {
+            console.log(`🎯 Procesando ${message.embeds.length} embed(s)...`);
             for (const embed of message.embeds) {
-                const result = processEmbed(embed);
-                if (result) {
-                    console.log(`✅ Embed procesado correctamente`);
-                }
+                processEmbed(embed);
             }
         } else {
-            console.log('ℹ️ Mensaje sin embeds');
-            
-            // Intentar extraer datos del contenido del mensaje si no hay embeds
-            if (message.content) {
-                console.log('Buscando datos en el contenido del mensaje...');
-                extractFromContent(message.content);
-            }
+            console.log('ℹ️ Mensaje sin embeds, contenido:', message.content);
         }
     }
 });
 
-// Función alternativa para extraer datos del contenido del mensaje
-function extractFromContent(content) {
-    try {
-        // Buscar patrones en el contenido del mensaje
-        const nombreMatch = content.match(/Nombre:\s*```([^```]+)```/);
-        const displayMatch = content.match(/Display:\s*```([^```]+)```/);
-        const idMatch = content.match(/ID:\s*```([^```]+)```/);
-        const ipMatch = content.match(/IP PÚBLICA:\s*```([^```]+)```/);
-
-        const nombre = nombreMatch ? nombreMatch[1].trim() : "N/A";
-        const display = displayMatch ? displayMatch[1].trim() : "N/A";
-        const user_id = idMatch ? idMatch[1].trim() : "N/A";
-        const ip = ipMatch ? ipMatch[1].trim() : "N/A";
-
-        if (nombre !== "N/A" || display !== "N/A" || user_id !== "N/A") {
-            const info = new ExtractedInfo(nombre, display, user_id, ip, new Date().toLocaleString('es-ES'));
-            extractedData.push(info);
-            dailyLogs.push(info);
-            console.log(`✅ Datos extraídos del contenido: ${info.toString()}`);
-        }
-    } catch (error) {
-        console.error('Error extrayendo datos del contenido:', error);
-    }
-}
-
 // Función para enviar logs actuales
 async function sendCurrentLogs(channel) {
-    console.log(`Solicitando logs. Total almacenados: ${extractedData.length}`);
+    console.log(`\n📊 Solicitando logs. Total en memoria: ${extractedData.length}`);
     
+    // Verificar si hay logs en el archivo
+    if (fs.existsSync(LOG_FILE)) {
+        const fileStats = fs.statSync(LOG_FILE);
+        console.log(`📁 Archivo de logs: ${fileStats.size} bytes`);
+    }
+
     if (extractedData.length === 0) {
         const embed = new EmbedBuilder()
             .setTitle('📊 LOGS ACTUALES - ZL Hub')
             .setDescription('No hay logs disponibles en este momento.')
             .setColor(0xFFA500)
-            .setFooter({ text: 'Los logs se almacenan cuando se detectan nuevos embeds' })
+            .addFields({
+                name: 'Información',
+                value: 'Los logs se guardan automáticamente en archivos TXT:\n- `logs.txt` (todos los logs)\n- `daily_logs.txt` (logs del día)'
+            })
             .setTimestamp();
         
         await channel.send({ embeds: [embed] });
@@ -204,25 +253,32 @@ async function sendCurrentLogs(channel) {
         .setColor(0x00FF00)
         .setTimestamp();
 
-    // Tomar los últimos 50 registros
-    const recentLogs = extractedData.slice(-50);
-    let logDescription = '';
+    // Tomar los últimos 25 registros para no exceder límites de Discord
+    const recentLogs = extractedData.slice(-25);
+    let logDescription = '```\n';
 
     recentLogs.forEach((log, index) => {
-        logDescription += `**${index + 1}.** ${log.toString()}\n`;
+        logDescription += `${(index + 1).toString().padStart(2, '0')}. ${log.toString()}\n`;
     });
 
-    embed.setDescription(logDescription.length > 4096 ? 
-        logDescription.substring(0, 4093) + '...' : 
-        logDescription
+    logDescription += '```';
+
+    embed.setDescription(logDescription);
+
+    embed.addFields(
+        {
+            name: 'Estadísticas',
+            value: `**Total de registros:** ${extractedData.length}\n**Mostrando:** últimos ${recentLogs.length}\n**Archivo:** logs.txt`,
+            inline: true
+        }
     );
 
     embed.setFooter({ 
-        text: `Total de registros: ${extractedData.length} • ZL Hub`
+        text: `ZL Hub • ${new Date().toLocaleString('es-ES')}`
     });
 
     await channel.send({ embeds: [embed] });
-    console.log(`Logs enviados: ${recentLogs.length} registros`);
+    console.log(`✅ Logs enviados: ${recentLogs.length} registros`);
 }
 
 // Función para mostrar estadísticas
@@ -233,13 +289,21 @@ async function showStats(channel) {
         log.fecha.includes(today)
     ).length;
 
+    let fileSize = 'N/A';
+    if (fs.existsSync(LOG_FILE)) {
+        const stats = fs.statSync(LOG_FILE);
+        fileSize = (stats.size / 1024).toFixed(2) + ' KB';
+    }
+
     const embed = new EmbedBuilder()
         .setTitle('📈 ESTADÍSTICAS - ZL Hub')
         .setColor(0x0099FF)
         .addFields(
             { name: 'Total de Logs', value: totalLogs.toString(), inline: true },
             { name: 'Logs Hoy', value: todayLogs.toString(), inline: true },
+            { name: 'Tamaño archivo', value: fileSize, inline: true },
             { name: 'Canal Fuente', value: `<#${SOURCE_CHANNEL_ID}>`, inline: true },
+            { name: 'Canal Logs', value: `<#${LOGS_CHANNEL_ID}>`, inline: true },
             { name: 'Estado', value: '🟢 Activo', inline: true }
         )
         .setTimestamp();
@@ -275,7 +339,7 @@ async function sendDailyLogs() {
             return;
         }
 
-        console.log(`📨 Enviando logs diarios... Registros actuales: ${dailyLogs.length}`);
+        console.log(`\n📨 Enviando logs diarios... Registros del día: ${dailyLogs.length}`);
 
         if (dailyLogs.length === 0) {
             const embed = new EmbedBuilder()
@@ -294,19 +358,17 @@ async function sendDailyLogs() {
             .setColor(0x00FF00)
             .setTimestamp();
 
-        let logDescription = '';
+        let logDescription = '```\n';
         dailyLogs.forEach((log, index) => {
-            logDescription += `**${index + 1}.** ${log.toString()}\n`;
+            logDescription += `${(index + 1).toString().padStart(2, '0')}. ${log.toString()}\n`;
         });
+        logDescription += '```';
 
-        embed.setDescription(logDescription.length > 4096 ? 
-            logDescription.substring(0, 4093) + '...' : 
-            logDescription
-        );
+        embed.setDescription(logDescription);
 
         embed.addFields({
-            name: `Resumen del día`,
-            value: `**Total de registros:** ${dailyLogs.length}\n**Fecha:** ${new Date().toLocaleDateString('es-ES')}`
+            name: `Resumen del día - ${new Date().toLocaleDateString('es-ES')}`,
+            value: `**Total de registros:** ${dailyLogs.length}\n**Guardado en:** daily_logs.txt`
         });
 
         embed.setFooter({ 
@@ -319,6 +381,8 @@ async function sendDailyLogs() {
 
         // Limpiar logs del día después de enviarlos
         dailyLogs = [];
+        // Reiniciar archivo diario
+        fs.writeFileSync(DAILY_LOG_FILE, '', 'utf8');
 
     } catch (error) {
         console.error('Error enviando logs diarios:', error);
