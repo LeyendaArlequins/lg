@@ -1,7 +1,7 @@
 // ===============================
 // BOT LOGGER COMPLETO BY CHATGPT
 // ===============================
-
+const TOKEN = process.env.TOKEN;
 const fs = require("fs");
 const path = require("path");
 const { Client, GatewayIntentBits } = require("discord.js");
@@ -150,4 +150,4 @@ setInterval(async () => {
 // ===============================
 // LOGIN
 // ===============================
-client.login("YOUR_BOT_TOKEN");
+client.login(TOKEN);
