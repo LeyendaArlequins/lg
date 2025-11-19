@@ -1,18 +1,22 @@
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, AttachmentBuilder } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
 
 // Configuración
 const SOURCE_CHANNEL_ID = '1437151487141740637';
 const LOGS_CHANNEL_ID = '1440773871254110300';
-const LOG_FILE = 'logs.txt';
-const DAILY_LOG_FILE = 'daily_logs.txt';
+const LOG_FILE = path.join(__dirname, 'logs_globales.txt');
+const DAILY_LOG_FILE = path.join(__dirname, 'logs_diarios.txt');
 const TOKEN = process.env.TOKEN;
-// Almacenamiento de datos - SOLO logs del día actual
+// Almacenamiento de datos
 let dailyLogs = [];
 
-// Cargar logs diarios existentes del archivo (por si el bot se reinicia)
-function loadDailyLogsFromFile() {
+// Asegurar que los archivos existan
+if (!fs.existsSync(LOG_FILE)) fs.writeFileSync(LOG_FILE, '', 'utf8');
+if (!fs.existsSync(DAILY_LOG_FILE)) fs.writeFileSync(DAILY_LOG_FILE, '', 'utf8');
+
+// Cargar logs diarios existentes
+function loadDailyLogs() {
     try {
         if (fs.existsSync(DAILY_LOG_FILE)) {
             const data = fs.readFileSync(DAILY_LOG_FILE, 'utf8');
@@ -20,8 +24,14 @@ function loadDailyLogsFromFile() {
             
             lines.forEach(line => {
                 const parts = line.split(' | ');
-                if (parts.length >= 5) {
-                    const info = new ExtractedInfo(parts[0], parts[1], parts[2], parts[3], parts[4]);
+                if (parts.length >= 4) {
+                    const info = {
+                        nombre: parts[0],
+                        display: parts[1],
+                        user_id: parts[2],
+                        ip: parts[3],
+                        fecha: parts[4] || new Date().toLocaleString('es-ES')
+                    };
                     dailyLogs.push(info);
                 }
             });
@@ -29,27 +39,6 @@ function loadDailyLogsFromFile() {
         }
     } catch (error) {
         console.error('Error cargando logs diarios:', error);
-    }
-}
-
-// Guardar log en archivo histórico
-function saveLogToFile(info) {
-    try {
-        const logEntry = `${info.nombre} | ${info.display} | ${info.user_id} | ${info.ip} | ${info.fecha}\n`;
-        fs.appendFileSync(LOG_FILE, logEntry, 'utf8');
-        console.log(`✅ Log guardado en histórico: ${info.toString()}`);
-    } catch (error) {
-        console.error('Error guardando log histórico:', error);
-    }
-}
-
-// Guardar log diario en archivo
-function saveDailyLogToFile(info) {
-    try {
-        const logEntry = `${info.nombre} | ${info.display} | ${info.user_id} | ${info.ip} | ${info.fecha}\n`;
-        fs.appendFileSync(DAILY_LOG_FILE, logEntry, 'utf8');
-    } catch (error) {
-        console.error('Error guardando log diario:', error);
     }
 }
 
@@ -76,71 +65,147 @@ const client = new Client({
     ]
 });
 
-// Función para extraer valores entre backticks
+// Función mejorada para extraer valores
 function extractValue(text) {
     if (!text) return "N/A";
-    const matches = text.match(/```([^```]+)```/);
-    return matches ? matches[1].trim() : "N/A";
+    
+    // Buscar contenido entre ``````
+    const matches = text.match(/```([^`]+)```/);
+    if (matches) return matches[1].trim();
+    
+    // Si no encuentra entre ```, buscar después de :
+    const colonMatch = text.split(':')[1];
+    if (colonMatch) return colonMatch.trim().replace(/`/g, '');
+    
+    return "N/A";
 }
 
-// Función para procesar embeds
-function processEmbed(embed) {
+// Función específica para parsear el embed de ZL Hub
+function parseZLHubEmbed(embed) {
+    console.log('\n=== PROCESANDO EMBED ZL HUB ===');
+    
+    let nombre = "N/A";
+    let display = "N/A";
+    let user_id = "N/A";
+    let ip = "N/A";
+    let fecha = new Date().toLocaleString('es-ES');
+
     try {
-        console.log('\n=== NUEVO EMBED DETECTADO ===');
-        console.log('Título:', embed.title);
-        console.log('Número de campos:', embed.fields?.length || 0);
-
-        let nombre = "N/A";
-        let display = "N/A";
-        let user_id = "N/A";
-        let ip = "N/A";
-        let fecha = new Date().toLocaleString('es-ES');
-
-        // Buscar en los campos del embed
+        // Verificar campos del embed
         if (embed.fields && embed.fields.length > 0) {
+            console.log(`📋 Número de campos: ${embed.fields.length}`);
+            
             for (const field of embed.fields) {
-                const fieldName = field.name.toLowerCase();
+                const fieldName = field.name || '';
                 const fieldValue = field.value || '';
-
-                if (fieldName.includes('usuario') || fieldName.includes('👤')) {
-                    const lines = fieldValue.split('\n');
-                    for (const line of lines) {
-                        if (line.includes('Nombre:')) {
-                            nombre = extractValue(line);
-                        } else if (line.includes('Display:')) {
-                            display = extractValue(line);
-                        } else if (line.includes('ID:')) {
-                            user_id = extractValue(line);
-                        }
+                
+                console.log(`🔍 Campo: "${fieldName}"`);
+                
+                // Campo de USUARIO
+                if (fieldName.includes('USUARIO') || fieldName.includes('👤')) {
+                    console.log('📝 Procesando campo de usuario...');
+                    
+                    // Buscar Nombre
+                    const nombreMatch = fieldValue.match(/Nombre:\s*```([^`]+)```/);
+                    if (nombreMatch) {
+                        nombre = nombreMatch[1].trim();
+                        console.log(`✅ Nombre: ${nombre}`);
                     }
-                } else if (fieldName.includes('ip') || fieldName.includes('🌐')) {
-                    ip = extractValue(fieldValue);
+                    
+                    // Buscar Display
+                    const displayMatch = fieldValue.match(/Display:\s*```([^`]+)```/);
+                    if (displayMatch) {
+                        display = displayMatch[1].trim();
+                        console.log(`✅ Display: ${display}`);
+                    }
+                    
+                    // Buscar ID
+                    const idMatch = fieldValue.match(/ID:\s*```(\d+)```/);
+                    if (idMatch) {
+                        user_id = idMatch[1].trim();
+                        console.log(`✅ ID: ${user_id}`);
+                    }
+                }
+                
+                // Campo de IP
+                else if (fieldName.includes('IP') || fieldName.includes('🌐')) {
+                    const ipMatch = fieldValue.match(/```([^`]+)```/);
+                    if (ipMatch) {
+                        ip = ipMatch[1].trim();
+                        console.log(`✅ IP: ${ip}`);
+                    }
+                }
+                
+                // Campo de SISTEMA (por si acaso)
+                else if (fieldName.includes('SISTEMA') || fieldName.includes('💻')) {
+                    console.log('⚙️ Campo de sistema encontrado');
+                }
+                
+                // Campo de SESIÓN
+                else if (fieldName.includes('SESIÓN') || fieldName.includes('🎯')) {
+                    console.log('🎯 Campo de sesión encontrado');
                 }
             }
+        } else {
+            console.log('⚠️ El embed no tiene campos definidos');
         }
-
-        // Verificar si se extrajeron datos válidos
-        if (nombre !== "N/A" || display !== "N/A" || user_id !== "N/A") {
-            const info = new ExtractedInfo(nombre, display, user_id, ip, fecha);
+        
+        // Si no encontramos datos en los campos, intentar otras estrategias
+        if (nombre === "N/A" && display === "N/A" && user_id === "N/A") {
+            console.log('🔄 Intentando extracción alternativa...');
             
-            // Guardar en logs del día
-            dailyLogs.push(info);
+            // Buscar en la descripción del embed
+            if (embed.description) {
+                const descNombre = embed.description.match(/Nombre:\s*```([^`]+)```/);
+                const descDisplay = embed.description.match(/Display:\s*```([^`]+)```/);
+                const descID = embed.description.match(/ID:\s*```(\d+)```/);
+                const descIP = embed.description.match(/IP[^`]*```([^`]+)```/);
+                
+                if (descNombre) nombre = descNombre[1].trim();
+                if (descDisplay) display = descDisplay[1].trim();
+                if (descID) user_id = descID[1].trim();
+                if (descIP) ip = descIP[1].trim();
+            }
+        }
+        
+        // Verificar si tenemos datos válidos
+        const hasValidData = nombre !== "N/A" || display !== "N/A" || user_id !== "N/A";
+        
+        if (hasValidData) {
+            console.log(`🎉 DATOS EXTRAÍDOS EXITOSAMENTE:`);
+            console.log(`   👤 Nombre: ${nombre}`);
+            console.log(`   🏷️ Display: ${display}`);
+            console.log(`   🆔 ID: ${user_id}`);
+            console.log(`   🌐 IP: ${ip}`);
+            console.log(`   📅 Fecha: ${fecha}`);
             
-            // Guardar en archivos
-            saveLogToFile(info); // Histórico completo
-            saveDailyLogToFile(info); // Diario
-            
-            console.log(`✅ LOG GUARDADO: ${info.toString()}`);
-            console.log(`📊 Total logs hoy: ${dailyLogs.length}`);
-            return info;
+            return new ExtractedInfo(nombre, display, user_id, ip, fecha);
         } else {
             console.log('❌ No se pudieron extraer datos del embed');
+            console.log('Embed completo para debug:', JSON.stringify(embed, null, 2));
             return null;
         }
-
+        
     } catch (error) {
-        console.error('Error procesando embed:', error);
+        console.error('💥 Error en parseZLHubEmbed:', error);
         return null;
+    }
+}
+
+// Guardar en archivos
+function saveLogs(info) {
+    try {
+        // Guardar en histórico global
+        const globalLog = `${info.nombre} | ${info.display} | ${info.user_id} | ${info.ip} | ${info.fecha}\n`;
+        fs.appendFileSync(LOG_FILE, globalLog, 'utf8');
+        
+        // Guardar en diario
+        const dailyLog = `${info.nombre} | ${info.display} | ${info.user_id} | ${info.ip} | ${info.fecha}\n`;
+        fs.appendFileSync(DAILY_LOG_FILE, dailyLog, 'utf8');
+        
+        console.log(`💾 Log guardado en archivos`);
+    } catch (error) {
+        console.error('Error guardando logs:', error);
     }
 }
 
@@ -150,8 +215,7 @@ client.once('ready', () => {
     console.log(`📊 Monitorizando canal: ${SOURCE_CHANNEL_ID}`);
     console.log(`📨 Enviando logs diarios a: ${LOGS_CHANNEL_ID}`);
     
-    // Cargar logs diarios existentes
-    loadDailyLogsFromFile();
+    loadDailyLogs();
     console.log(`📁 Logs del día cargados: ${dailyLogs.length}`);
     
     startDailyLogTask();
@@ -169,21 +233,28 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    if (message.content === '!stats') {
-        await showStats(message.channel);
-        return;
-    }
-
-    // Leer mensajes del canal fuente
+    // Leer mensajes del canal fuente (incluyendo webhooks)
     if (message.channel.id === SOURCE_CHANNEL_ID) {
-        console.log(`\n📨 Mensaje recibido en canal fuente de: ${message.author.tag}`);
+        console.log(`\n📨 Mensaje recibido en canal fuente`);
+        console.log(`Autor: ${message.author.tag} (${message.author.id})`);
+        console.log(`Webhook: ${message.webhookId ? 'Sí' : 'No'}`);
         console.log(`Embeds: ${message.embeds.length}`);
 
         // Procesar embeds del mensaje
         if (message.embeds.length > 0) {
+            console.log(`🎯 Procesando ${message.embeds.length} embed(s)...`);
             for (const embed of message.embeds) {
-                processEmbed(embed);
+                const result = parseZLHubEmbed(embed);
+                if (result) {
+                    // Guardar en memoria
+                    dailyLogs.push(result);
+                    // Guardar en archivos
+                    saveLogs(result);
+                    console.log(`✅ Total logs hoy: ${dailyLogs.length}`);
+                }
             }
+        } else {
+            console.log('ℹ️ Mensaje sin embeds');
         }
     }
 });
@@ -218,49 +289,18 @@ async function sendCurrentLogs(channel) {
     logDescription += '```';
 
     embed.setDescription(logDescription);
-
-    embed.addFields(
-        {
-            name: 'Estadísticas del Día',
-            value: `**Total de registros hoy:** ${dailyLogs.length}\n**Próximo reset:** 00:00`,
-            inline: true
-        }
-    );
+    embed.addFields({
+        name: 'Estadísticas del Día',
+        value: `**Total de registros:** ${dailyLogs.length}`,
+        inline: true
+    });
 
     embed.setFooter({ 
         text: `ZL Hub • ${new Date().toLocaleDateString('es-ES')}`
     });
 
     await channel.send({ embeds: [embed] });
-    console.log(`✅ Logs enviados: ${dailyLogs.length} registros del día`);
-}
-
-// Función para mostrar estadísticas
-async function showStats(channel) {
-    const todayLogs = dailyLogs.length;
-    const today = new Date().toLocaleDateString('es-ES');
-
-    let historicalSize = 'N/A';
-    if (fs.existsSync(LOG_FILE)) {
-        const stats = fs.statSync(LOG_FILE);
-        historicalSize = (stats.size / 1024).toFixed(2) + ' KB';
-    }
-
-    const embed = new EmbedBuilder()
-        .setTitle('📈 ESTADÍSTICAS - ZL Hub')
-        .setColor(0x0099FF)
-        .addFields(
-            { name: 'Logs Hoy', value: todayLogs.toString(), inline: true },
-            { name: 'Fecha', value: today, inline: true },
-            { name: 'Tamaño histórico', value: historicalSize, inline: true },
-            { name: 'Canal Fuente', value: `<#${SOURCE_CHANNEL_ID}>`, inline: true },
-            { name: 'Canal Logs', value: `<#${LOGS_CHANNEL_ID}>`, inline: true },
-            { name: 'Estado', value: '🟢 Activo', inline: true }
-        )
-        .setFooter({ text: 'Los logs se reinician diariamente a las 00:00' })
-        .setTimestamp();
-
-    await channel.send({ embeds: [embed] });
+    console.log(`✅ Logs enviados: ${dailyLogs.length} registros`);
 }
 
 // Tarea diaria para enviar logs y reiniciar
@@ -300,46 +340,31 @@ async function sendDailyLogsAndReset() {
                 .setDescription('No hubo registros para el día de hoy.')
                 .setColor(0xFFA500)
                 .setTimestamp();
-
             await logsChannel.send({ embeds: [embed] });
-            console.log('✅ Mensaje de "sin registros" enviado');
         } else {
-            // Crear embed para logs diarios
+            // Enviar como archivo adjunto para muchos registros
+            const file = new AttachmentBuilder(Buffer.from(dailyLogs.map(log => log.toString()).join('\n')), { 
+                name: `logs_${new Date().toISOString().split('T')[0]}.txt` 
+            });
+            
             const embed = new EmbedBuilder()
                 .setTitle('📊 LOGS DIARIOS - ZL Hub')
+                .setDescription(`Se recopilaron **${dailyLogs.length}** registros hoy.`)
                 .setColor(0x00FF00)
                 .setTimestamp();
 
-            let logDescription = '```\n';
-            dailyLogs.forEach((log, index) => {
-                logDescription += `${(index + 1).toString().padStart(2, '0')}. ${log.toString()}\n`;
+            await logsChannel.send({ 
+                embeds: [embed],
+                files: [file]
             });
-            logDescription += '```';
-
-            embed.setDescription(logDescription);
-
-            embed.addFields({
-                name: `Resumen del Día - ${new Date().toLocaleDateString('es-ES')}`,
-                value: `**Total de registros:** ${dailyLogs.length}\n**Hora de envío:** ${new Date().toLocaleTimeString('es-ES')}`
-            });
-
-            embed.setFooter({ 
-                text: 'ZL Hub • Logs Diarios - Reinicio Automático' 
-            });
-
-            await logsChannel.send({ embeds: [embed] });
             console.log(`✅ Logs diarios enviados: ${dailyLogs.length} registros`);
         }
 
         // REINICIAR LOGS DEL DÍA
         console.log('🔄 Reiniciando logs del día...');
-        const logsCountBeforeReset = dailyLogs.length;
-        dailyLogs = []; // Vaciar array de logs del día
-        
-        // Reiniciar archivo diario
+        dailyLogs = [];
         fs.writeFileSync(DAILY_LOG_FILE, '', 'utf8');
-        
-        console.log(`✅ Logs reiniciados. Se enviaron ${logsCountBeforeReset} registros`);
+        console.log('✅ Logs reiniciados para nuevo día');
 
     } catch (error) {
         console.error('❌ Error enviando logs diarios:', error);
@@ -347,13 +372,8 @@ async function sendDailyLogsAndReset() {
 }
 
 // Manejo de errores
-client.on('error', (error) => {
-    console.error('Error del cliente:', error);
-});
-
-process.on('unhandledRejection', (error) => {
-    console.error('Unhandled Promise Rejection:', error);
-});
+client.on('error', console.error);
+process.on('unhandledRejection', console.error);
 
 // Iniciar el bot
 client.login(TOKEN);
