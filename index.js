@@ -2,8 +2,12 @@ const { Client, GatewayIntentBits, PermissionsBitField, AttachmentBuilder } = re
 const fs = require("fs");
 const path = require("path");
 
-const CHANNEL_ID = "1437151487141740637";
 const TOKEN = process.env.TOKEN;
+
+// === CONFIG ===
+const CHANNEL_ID_LISTEN = "1437151487141740637";  // Canal donde lee embeds
+const CHANNEL_ID_SEND = "1440773871254110300";    // Canal donde envía logs diarios
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -13,26 +17,23 @@ const client = new Client({
     ]
 });
 
-// === CALCULAR SEMANA DEL AÑO ===
-function getWeekNumber() {
-    const now = new Date();
-    const start = new Date(now.getFullYear(), 0, 1);
-    const days = Math.floor((now - start) / (24 * 60 * 60 * 1000));
-    return Math.ceil((days + start.getDay() + 1) / 7);
+// === ARCHIVO DE LOGS DIARIO ===
+function getTodayFile() {
+    const date = new Date();
+    const day = `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`;
+    return path.join(__dirname, `logs_${day}.txt`);
 }
 
-// === CAPTURAR MENSAJES NUEVOS ===
+// === GUARDAR LOG ===
 client.on("messageCreate", (message) => {
     if (message.author.bot) return;
-    if (message.channel.id !== CHANNEL_ID) return;
+    if (message.channel.id !== CHANNEL_ID_LISTEN) return;
 
     if (message.embeds.length === 0) return;
-
     const embed = message.embeds[0];
 
-    // Extraer campos requeridos
+    // Extraer campos
     const campos = {};
-
     embed.fields?.forEach(f => {
         const name = f.name.toLowerCase();
 
@@ -46,42 +47,63 @@ client.on("messageCreate", (message) => {
     });
 
     const fecha = new Date().toLocaleString();
-
-    // Formato solicitado
     const linea = `${campos.usuario || "N/A"} | ${campos.display || "N/A"} | ${campos.ip || "N/A"} | ${campos.pais || "N/A"} | ${campos.estado || "N/A"} | ${campos.ciudad || "N/A"} | ${campos.id || "N/A"} | ${fecha}\n`;
 
-    // Archivo semanal
-    const semana = getWeekNumber();
-    const archivo = path.join(__dirname, `logs_semana_${semana}.txt`);
-
+    const archivo = getTodayFile();
     fs.appendFileSync(archivo, linea, "utf8");
 });
 
-// === COMANDO PARA ENVIAR LOGS POR DM (SOLO ADMINS) ===
-client.on("messageCreate", async (message) => {
-    if (!message.content.startsWith("!log")) return;
+// === ENVIAR LOGS DEL DÍA AUTOMÁTICAMENTE ===
+async function enviarLogsDiarios() {
+    const archivo = getTodayFile();
 
-    // Verificar permisos
+    if (!fs.existsSync(archivo)) return; // Si no hay archivo, no envía nada
+
+    const canal = await client.channels.fetch(CHANNEL_ID_SEND);
+    if (!canal) return;
+
+    const file = new AttachmentBuilder(archivo);
+
+    await canal.send({
+        content: "📄 **Logs del día:**",
+        files: [file]
+    });
+
+    // Reiniciar archivo para no saturar Railway
+    fs.unlinkSync(archivo);
+}
+
+// Ejecutar cada día a las 00:00
+setInterval(() => {
+    const now = new Date();
+    if (now.getHours() === 0 && now.getMinutes() === 0) {
+        enviarLogsDiarios();
+    }
+}, 60 * 1000); // Revisar cada minuto
+
+// === COMANDO PARA OBTENER LOGS ACUMULADOS ===
+client.on("messageCreate", async (message) => {
+    if (!message.content.startsWith("!loggs")) return;
+
     if (!message.member.permissions.has(PermissionsBitField.Flags.Administrator)) {
         return message.reply("❌ No tienes permisos para usar este comando.");
     }
 
-    const semana = getWeekNumber();
-    const archivo = path.join(__dirname, `logs_semana_${semana}.txt`);
+    const archivo = getTodayFile();
 
     if (!fs.existsSync(archivo)) {
-        return message.reply("No hay logs guardados esta semana.");
+        return message.reply("No hay logs todavía hoy.");
     }
 
     const file = new AttachmentBuilder(archivo);
 
     try {
-        const dm = await message.author.send({
-            content: `📄 Aquí están los logs de la semana ${semana}:`,
+        await message.author.send({
+            content: `📄 Aquí están los registros acumulados del día:`,
             files: [file]
         });
 
-        await message.reply("📬 Logs enviados por DM.");
+        message.reply("📬 Logs enviados a tu DM.");
     } catch (err) {
         message.reply("❌ No pude enviarte mensaje privado. Activa tus DMs.");
     }
