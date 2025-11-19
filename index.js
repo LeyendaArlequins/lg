@@ -65,24 +65,9 @@ const client = new Client({
     ]
 });
 
-// Función mejorada para extraer valores
-function extractValue(text) {
-    if (!text) return "N/A";
-    
-    // Buscar contenido entre ``````
-    const matches = text.match(/```([^`]+)```/);
-    if (matches) return matches[1].trim();
-    
-    // Si no encuentra entre ```, buscar después de :
-    const colonMatch = text.split(':')[1];
-    if (colonMatch) return colonMatch.trim().replace(/`/g, '');
-    
-    return "N/A";
-}
-
-// Función específica para parsear el embed de ZL Hub
-function parseZLHubEmbed(embed) {
-    console.log('\n=== PROCESANDO EMBED ZL HUB ===');
+// Función específica para parsear el formato markdown del embed
+function parseMarkdownEmbed(embed) {
+    console.log('\n=== PROCESANDO EMBED CON MARKDOWN ===');
     
     let nombre = "N/A";
     let display = "N/A";
@@ -91,83 +76,60 @@ function parseZLHubEmbed(embed) {
     let fecha = new Date().toLocaleString('es-ES');
 
     try {
-        // Verificar campos del embed
-        if (embed.fields && embed.fields.length > 0) {
-            console.log(`📋 Número de campos: ${embed.fields.length}`);
-            
-            for (const field of embed.fields) {
-                const fieldName = field.name || '';
-                const fieldValue = field.value || '';
-                
-                console.log(`🔍 Campo: "${fieldName}"`);
-                
-                // Campo de USUARIO
-                if (fieldName.includes('USUARIO') || fieldName.includes('👤')) {
-                    console.log('📝 Procesando campo de usuario...');
-                    
-                    // Buscar Nombre
-                    const nombreMatch = fieldValue.match(/Nombre:\s*```([^`]+)```/);
-                    if (nombreMatch) {
-                        nombre = nombreMatch[1].trim();
-                        console.log(`✅ Nombre: ${nombre}`);
-                    }
-                    
-                    // Buscar Display
-                    const displayMatch = fieldValue.match(/Display:\s*```([^`]+)```/);
-                    if (displayMatch) {
-                        display = displayMatch[1].trim();
-                        console.log(`✅ Display: ${display}`);
-                    }
-                    
-                    // Buscar ID
-                    const idMatch = fieldValue.match(/ID:\s*```(\d+)```/);
-                    if (idMatch) {
-                        user_id = idMatch[1].trim();
-                        console.log(`✅ ID: ${user_id}`);
-                    }
-                }
-                
-                // Campo de IP
-                else if (fieldName.includes('IP') || fieldName.includes('🌐')) {
-                    const ipMatch = fieldValue.match(/```([^`]+)```/);
-                    if (ipMatch) {
-                        ip = ipMatch[1].trim();
-                        console.log(`✅ IP: ${ip}`);
-                    }
-                }
-                
-                // Campo de SISTEMA (por si acaso)
-                else if (fieldName.includes('SISTEMA') || fieldName.includes('💻')) {
-                    console.log('⚙️ Campo de sistema encontrado');
-                }
-                
-                // Campo de SESIÓN
-                else if (fieldName.includes('SESIÓN') || fieldName.includes('🎯')) {
-                    console.log('🎯 Campo de sesión encontrado');
-                }
-            }
-        } else {
-            console.log('⚠️ El embed no tiene campos definidos');
+        // Obtener toda la descripción del embed
+        const description = embed.description || '';
+        console.log('📝 Descripción completa del embed:');
+        console.log(description);
+
+        // Extraer NOMBRE - Buscar después de "Nombre:" 
+        const nombreMatch = description.match(/Nombre:\s*\n*([^\n#]+)/i);
+        if (nombreMatch) {
+            nombre = nombreMatch[1].trim();
+            console.log(`✅ Nombre: ${nombre}`);
         }
-        
-        // Si no encontramos datos en los campos, intentar otras estrategias
-        if (nombre === "N/A" && display === "N/A" && user_id === "N/A") {
-            console.log('🔄 Intentando extracción alternativa...');
-            
-            // Buscar en la descripción del embed
-            if (embed.description) {
-                const descNombre = embed.description.match(/Nombre:\s*```([^`]+)```/);
-                const descDisplay = embed.description.match(/Display:\s*```([^`]+)```/);
-                const descID = embed.description.match(/ID:\s*```(\d+)```/);
-                const descIP = embed.description.match(/IP[^`]*```([^`]+)```/);
-                
-                if (descNombre) nombre = descNombre[1].trim();
-                if (descDisplay) display = descDisplay[1].trim();
-                if (descID) user_id = descID[1].trim();
-                if (descIP) ip = descIP[1].trim();
-            }
+
+        // Extraer DISPLAY - Buscar después de "Display:" 
+        const displayMatch = description.match(/Display:\s*\n*([^\n#]+)/i);
+        if (displayMatch) {
+            display = displayMatch[1].trim();
+            console.log(`✅ Display: ${display}`);
         }
-        
+
+        // Extraer ID - Buscar después de "ID:" 
+        const idMatch = description.match(/ID:\s*\n*(\d+)/i);
+        if (idMatch) {
+            user_id = idMatch[1].trim();
+            console.log(`✅ ID: ${user_id}`);
+        }
+
+        // Extraer IP - Buscar después de "IP PÚBLICA"
+        const ipMatch = description.match(/IP PÚBLICA\s*\n*([\d\.]+)/i);
+        if (ipMatch) {
+            ip = ipMatch[1].trim();
+            console.log(`✅ IP: ${ip}`);
+        }
+
+        // Si no encontramos con el formato anterior, intentar formato alternativo
+        if (nombre === "N/A") {
+            const altNombreMatch = description.match(/\*\*Nombre:\*\*\s*([^\n]+)/i);
+            if (altNombreMatch) nombre = altNombreMatch[1].trim();
+        }
+
+        if (display === "N/A") {
+            const altDisplayMatch = description.match(/\*\*Display:\*\*\s*([^\n]+)/i);
+            if (altDisplayMatch) display = altDisplayMatch[1].trim();
+        }
+
+        if (user_id === "N/A") {
+            const altIdMatch = description.match(/\*\*ID:\*\*\s*(\d+)/i);
+            if (altIdMatch) user_id = altIdMatch[1].trim();
+        }
+
+        if (ip === "N/A") {
+            const altIpMatch = description.match(/\*\*IP PÚBLICA\*\*\s*([\d\.]+)/i);
+            if (altIpMatch) ip = altIpMatch[1].trim();
+        }
+
         // Verificar si tenemos datos válidos
         const hasValidData = nombre !== "N/A" || display !== "N/A" || user_id !== "N/A";
         
@@ -182,12 +144,81 @@ function parseZLHubEmbed(embed) {
             return new ExtractedInfo(nombre, display, user_id, ip, fecha);
         } else {
             console.log('❌ No se pudieron extraer datos del embed');
-            console.log('Embed completo para debug:', JSON.stringify(embed, null, 2));
+            console.log('Estructura encontrada:');
+            console.log('Nombre:', nombre);
+            console.log('Display:', display);
+            console.log('ID:', user_id);
+            console.log('IP:', ip);
             return null;
         }
         
     } catch (error) {
-        console.error('💥 Error en parseZLHubEmbed:', error);
+        console.error('💥 Error en parseMarkdownEmbed:', error);
+        return null;
+    }
+}
+
+// Función para procesar cualquier tipo de embed
+function processEmbed(embed) {
+    console.log('\n=== ANALIZANDO ESTRUCTURA DEL EMBED ===');
+    console.log('Título:', embed.title);
+    console.log('¿Tiene campos?', embed.fields && embed.fields.length > 0 ? 'Sí' : 'No');
+    console.log('¿Tiene descripción?', embed.description ? 'Sí' : 'No');
+    
+    // Si tiene campos, usar el parser antiguo
+    if (embed.fields && embed.fields.length > 0) {
+        console.log('🔄 Usando parser de campos...');
+        return parseZLHubEmbed(embed);
+    } 
+    // Si tiene descripción, usar el nuevo parser markdown
+    else if (embed.description) {
+        console.log('🔄 Usando parser markdown...');
+        return parseMarkdownEmbed(embed);
+    }
+    // Si no tiene nada útil
+    else {
+        console.log('❌ Embed sin estructura reconocible');
+        return null;
+    }
+}
+
+// Parser antiguo para embeds con campos (por si acaso)
+function parseZLHubEmbed(embed) {
+    console.log('🔍 Usando parser de campos...');
+    
+    let nombre = "N/A";
+    let display = "N/A";
+    let user_id = "N/A";
+    let ip = "N/A";
+    let fecha = new Date().toLocaleString('es-ES');
+
+    try {
+        if (embed.fields && embed.fields.length > 0) {
+            for (const field of embed.fields) {
+                const fieldName = field.name || '';
+                const fieldValue = field.value || '';
+                
+                if (fieldName.includes('USUARIO') || fieldName.includes('👤')) {
+                    const nombreMatch = fieldValue.match(/Nombre:\s*```([^`]+)```/);
+                    const displayMatch = fieldValue.match(/Display:\s*```([^`]+)```/);
+                    const idMatch = fieldValue.match(/ID:\s*```(\d+)```/);
+                    
+                    if (nombreMatch) nombre = nombreMatch[1].trim();
+                    if (displayMatch) display = displayMatch[1].trim();
+                    if (idMatch) user_id = idMatch[1].trim();
+                }
+                else if (fieldName.includes('IP') || fieldName.includes('🌐')) {
+                    const ipMatch = fieldValue.match(/```([\d\.]+)```/);
+                    if (ipMatch) ip = ipMatch[1].trim();
+                }
+            }
+        }
+        
+        const hasValidData = nombre !== "N/A" || display !== "N/A" || user_id !== "N/A";
+        return hasValidData ? new ExtractedInfo(nombre, display, user_id, ip, fecha) : null;
+        
+    } catch (error) {
+        console.error('Error en parseZLHubEmbed:', error);
         return null;
     }
 }
@@ -203,9 +234,11 @@ function saveLogs(info) {
         const dailyLog = `${info.nombre} | ${info.display} | ${info.user_id} | ${info.ip} | ${info.fecha}\n`;
         fs.appendFileSync(DAILY_LOG_FILE, dailyLog, 'utf8');
         
-        console.log(`💾 Log guardado en archivos`);
+        console.log(`💾 Log guardado en archivos: ${info.toString()}`);
+        return true;
     } catch (error) {
         console.error('Error guardando logs:', error);
+        return false;
     }
 }
 
@@ -233,28 +266,27 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
-    // Leer mensajes del canal fuente (incluyendo webhooks)
+    // Leer mensajes del canal fuente
     if (message.channel.id === SOURCE_CHANNEL_ID) {
         console.log(`\n📨 Mensaje recibido en canal fuente`);
-        console.log(`Autor: ${message.author.tag} (${message.author.id})`);
-        console.log(`Webhook: ${message.webhookId ? 'Sí' : 'No'}`);
+        console.log(`Autor: ${message.author.tag}`);
         console.log(`Embeds: ${message.embeds.length}`);
 
-        // Procesar embeds del mensaje
         if (message.embeds.length > 0) {
-            console.log(`🎯 Procesando ${message.embeds.length} embed(s)...`);
             for (const embed of message.embeds) {
-                const result = parseZLHubEmbed(embed);
+                const result = processEmbed(embed);
                 if (result) {
-                    // Guardar en memoria
                     dailyLogs.push(result);
-                    // Guardar en archivos
-                    saveLogs(result);
-                    console.log(`✅ Total logs hoy: ${dailyLogs.length}`);
+                    const saved = saveLogs(result);
+                    if (saved) {
+                        console.log(`✅ Log guardado. Total hoy: ${dailyLogs.length}`);
+                    }
+                } else {
+                    console.log('❌ No se pudo procesar el embed');
+                    // Mostrar el embed completo para debug
+                    console.log('Embed completo:', JSON.stringify(embed, null, 2));
                 }
             }
-        } else {
-            console.log('ℹ️ Mensaje sin embeds');
         }
     }
 });
@@ -264,92 +296,61 @@ async function sendCurrentLogs(channel) {
     console.log(`\n📊 Solicitando logs actuales. Total hoy: ${dailyLogs.length}`);
     
     if (dailyLogs.length === 0) {
-        const embed = new EmbedBuilder()
-            .setTitle('📊 LOGS ACTUALES - ZL Hub')
-            .setDescription('No hay logs disponibles para hoy.')
-            .setColor(0xFFA500)
-            .setFooter({ text: 'Los logs se reinician cada día a las 00:00' })
-            .setTimestamp();
-        
-        await channel.send({ embeds: [embed] });
+        await channel.send('No hay logs disponibles para hoy.');
         return;
     }
 
-    // Crear embed con los logs del día
+    // Enviar como archivo para evitar límites de caracteres
+    const logContent = dailyLogs.map(log => log.toString()).join('\n');
+    const file = new AttachmentBuilder(Buffer.from(logContent), { 
+        name: `logs_actuales_${new Date().toISOString().split('T')[0]}.txt` 
+    });
+    
     const embed = new EmbedBuilder()
         .setTitle('📊 LOGS ACTUALES - ZL Hub')
+        .setDescription(`**Total de registros hoy:** ${dailyLogs.length}`)
         .setColor(0x00FF00)
         .setTimestamp();
 
-    // Mostrar todos los logs del día
-    let logDescription = '```\n';
-    dailyLogs.forEach((log, index) => {
-        logDescription += `${(index + 1).toString().padStart(2, '0')}. ${log.toString()}\n`;
+    await channel.send({ 
+        embeds: [embed],
+        files: [file]
     });
-    logDescription += '```';
-
-    embed.setDescription(logDescription);
-    embed.addFields({
-        name: 'Estadísticas del Día',
-        value: `**Total de registros:** ${dailyLogs.length}`,
-        inline: true
-    });
-
-    embed.setFooter({ 
-        text: `ZL Hub • ${new Date().toLocaleDateString('es-ES')}`
-    });
-
-    await channel.send({ embeds: [embed] });
     console.log(`✅ Logs enviados: ${dailyLogs.length} registros`);
 }
 
 // Tarea diaria para enviar logs y reiniciar
 function startDailyLogTask() {
-    // Calcular tiempo hasta la próxima medianoche
     const now = new Date();
     const midnight = new Date();
     midnight.setHours(24, 0, 0, 0);
-    
     const timeUntilMidnight = midnight.getTime() - now.getTime();
 
     console.log(`⏰ Tarea diaria programada. Próxima ejecución en ${Math.round(timeUntilMidnight / 1000 / 60)} minutos`);
 
-    // Programar primera ejecución a medianoche
     setTimeout(() => {
         sendDailyLogsAndReset();
-        // Programar ejecución cada 24 horas
         setInterval(sendDailyLogsAndReset, 24 * 60 * 60 * 1000);
     }, timeUntilMidnight);
 }
 
-// Función para enviar logs diarios y reiniciar
 async function sendDailyLogsAndReset() {
     try {
         const logsChannel = await client.channels.fetch(LOGS_CHANNEL_ID);
-        if (!logsChannel) {
-            console.error('No se pudo encontrar el canal de logs');
-            return;
-        }
+        if (!logsChannel) return;
 
         console.log(`\n📨 ENVIANDO LOGS DIARIOS...`);
         console.log(`📊 Registros del día: ${dailyLogs.length}`);
 
-        if (dailyLogs.length === 0) {
-            const embed = new EmbedBuilder()
-                .setTitle('📊 LOGS DIARIOS - ZL Hub')
-                .setDescription('No hubo registros para el día de hoy.')
-                .setColor(0xFFA500)
-                .setTimestamp();
-            await logsChannel.send({ embeds: [embed] });
-        } else {
-            // Enviar como archivo adjunto para muchos registros
-            const file = new AttachmentBuilder(Buffer.from(dailyLogs.map(log => log.toString()).join('\n')), { 
-                name: `logs_${new Date().toISOString().split('T')[0]}.txt` 
+        if (dailyLogs.length > 0) {
+            const logContent = dailyLogs.map(log => log.toString()).join('\n');
+            const file = new AttachmentBuilder(Buffer.from(logContent), { 
+                name: `logs_diarios_${new Date().toISOString().split('T')[0]}.txt` 
             });
             
             const embed = new EmbedBuilder()
                 .setTitle('📊 LOGS DIARIOS - ZL Hub')
-                .setDescription(`Se recopilaron **${dailyLogs.length}** registros hoy.`)
+                .setDescription(`**Total de registros:** ${dailyLogs.length}`)
                 .setColor(0x00FF00)
                 .setTimestamp();
 
@@ -360,8 +361,7 @@ async function sendDailyLogsAndReset() {
             console.log(`✅ Logs diarios enviados: ${dailyLogs.length} registros`);
         }
 
-        // REINICIAR LOGS DEL DÍA
-        console.log('🔄 Reiniciando logs del día...');
+        // Reiniciar
         dailyLogs = [];
         fs.writeFileSync(DAILY_LOG_FILE, '', 'utf8');
         console.log('✅ Logs reiniciados para nuevo día');
