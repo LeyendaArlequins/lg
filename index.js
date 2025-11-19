@@ -1,4 +1,4 @@
-const { Client, GatewayIntentBits, Partials } = require("discord.js");
+cost { Client, GatewayIntentBits, Partials } = require("discord.js");
 const fs = require("fs");
 
 const client = new Client({
