@@ -26,7 +26,8 @@ function getTodayFile() {
 
 // === GUARDAR LOG ===
 client.on("messageCreate", (message) => {
-    if (message.author.bot) return;
+    // Aceptar mensajes de webhook, pero ignorar bots normales
+if (!message.webhookId && message.author.bot) return;
     if (message.channel.id !== CHANNEL_ID_LISTEN) return;
 
     if (message.embeds.length === 0) return;
