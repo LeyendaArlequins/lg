@@ -1,11 +1,31 @@
 {
-  "name": "discord-logger-bot",
+  "name": "roblox-autojoin-bot",
   "version": "1.0.0",
+  "description": "Bot de Discord para auto-join en Roblox",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "nodemon index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
-    "discord.js": "^14.14.1"
+    "discord.js": "^14.14.1",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  },
+  "keywords": [
+    "discord",
+    "bot",
+    "roblox",
+    "autojoin",
+    "teleport"
+  ],
+  "author": "TuNombre",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
