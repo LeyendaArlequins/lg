@@ -5,7 +5,7 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent] 
 });
 
-const SERVER_URL = "https://tu-app.vercel.app/api/teleport";
+const SERVER_URL = "https://tngggg.vercel.app/api/teleport";
 
 client.on('ready', () => {
     console.log(`✅ Bot conectado como ${client.user.tag}`);
